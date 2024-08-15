@@ -1,0 +1,378 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<bpr:release xmlns:bpr="http://www.blueprism.co.uk/product/release">
+    <bpr:name>AWS REST API Utility</bpr:name>
+    <bpr:release-notes>AWS REST API Utility</bpr:release-notes>
+    <bpr:created>2023-12-11 10:11:47Z</bpr:created>
+    <bpr:package-id>172</bpr:package-id>
+    <bpr:package-name>BluePrism AWS REST API Utility</bpr:package-name>
+    <bpr:user-created-by>admin</bpr:user-created-by>
+    <bpr:contents count="2">
+        <object id="cadfadb2-503e-40fc-8950-4aa35b4b3db1" name="BluePrism AWS REST API Utility" xmlns="http://www.blueprism.co.uk/product/process"><process name="BluePrism AWS REST API Utility" version="1.0" bpversion="6.10.3.47902" narrative="BluePrism AWS REST API Utility" byrefcollection="true" type="object" runmode="Exclusive"><appdef><element name="Application Root"><id>928e3425-0d7e-42bd-981c-656efcc7dba3</id><type>Application</type><basetype>Application</basetype><datatype>unknown</datatype><diagnose>False</diagnose></element></appdef><view><camerax>124</camerax><cameray>-74</cameray><zoom version="2">1.25</zoom></view><preconditions /><endpoint narrative="" /><subsheet subsheetid="ffa70557-69e3-4cb1-a3ef-9bee4609d5b4" type="CleanUp" published="True"><name>Clean Up</name><view><camerax>-131</camerax><cameray>0</cameray><zoom version="2">1.25</zoom></view></subsheet><subsheet subsheetid="7e3a7b01-2b7e-4338-adcb-7f5c796865b4" type="Normal" published="True"><name>Call AWS Service</name><view><camerax>100</camerax><cameray>-75</cameray><zoom version="2">1.25</zoom></view></subsheet><stage stageid="9ad22f41-10cf-4834-974c-ad8adaae01bf" name="Start" type="Start"><loginhibit /><narrative>Start of action</narrative><display x="135" y="-90" /><onsuccess>d1ddac99-c78a-4207-ba7e-52d88d683479</onsuccess></stage><stage stageid="d1ddac99-c78a-4207-ba7e-52d88d683479" name="End" type="End"><loginhibit /><narrative>End of action</narrative><display x="135" y="150" /></stage><stage stageid="d7847fc3-5f7c-4ad4-94df-2b92a85a9302" name="Stage1" type="ProcessInfo"><display x="-195" y="-120" w="300" h="90" /><references><reference>System.dll</reference><reference>System.Data.dll</reference><reference>System.Xml.dll</reference><reference>System.Drawing.dll</reference><reference>System.Web.dll</reference></references><imports><import>System</import><import>System.Drawing</import><import>System.Data</import><import>System.Text</import><import>System.Security.Cryptography</import><import>System.Collections.Generic</import><import>System.Text.RegularExpressions</import><import>System.Globalization</import><import>System.IO</import><import>System.Web</import></imports><language>csharp</language><globalcode><![CDATA[]]></globalcode><code><![CDATA[// SHA256 hash of an empty request body
+public string EMPTY_BODY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+public string SCHEME = "AWS4";
+public string ALGORITHM = "HMAC-SHA256";
+public string TERMINATOR = "aws4_request";
+
+// format strings for the date/time and date stamps required during signing
+public string ISO8601BasicFormat = "yyyyMMddTHHmmssZ";
+public string DateStringFormat = "yyyyMMdd";
+
+// some common x-amz-* parameters
+string X_Amz_Algorithm = "X-Amz-Algorithm";
+string X_Amz_Credential = "X-Amz-Credential";
+string X_Amz_SignedHeaders = "X-Amz-SignedHeaders";
+string X_Amz_Date = "x-amz-date";
+string X_Amz_Signature = "X-Amz-Signature";
+string X_Amz_Expires = "X-Amz-Expires";
+string X_Amz_Content_SHA256 = "X-Amz-Content-SHA256";
+string X_Amz_Decoded_Content_Length = "X-Amz-Decoded-Content-Length";
+string X_Amz_Meta_UUID = "X-Amz-Meta-UUID";
+
+// the name of the keyed hash algorithm used in signing
+string HMACSHA256 = "HMACSHA256";
+
+Regex CompressWhitespaceRegex = new Regex("\\s+");
+
+Uri uri;
+
+HashAlgorithm CanonicalRequestHashAlgorithm = HashAlgorithm.Create("SHA-256");
+
+string AWS_Service;
+
+public string ComputeSignature(IDictionary<string, string> headers,
+                            string dateTimeStamp,   
+							string httpMethod,
+                            string bodyHash,
+                            string awsAccessKey,
+                            string awsSecretKey,
+							string awsUri,
+							string awsRegion,
+							string awsService)
+{
+    AWS_Service = awsService;
+	
+	// first get the date and time for the subsequent request, and convert to ISO 8601 format
+    // for use in signature generation
+    var requestDateTime = DateTime.UtcNow;
+
+    // update the headers with required 'x-amz-date' and 'host' values
+//    headers.Add(X_Amz_Date, dateTimeStamp);
+
+    uri = new Uri(awsUri);
+	var hostHeader = uri.Host;
+    if (!uri.IsDefaultPort)
+        hostHeader += ":" + uri.Port;
+    headers.Add("host", hostHeader);
+
+    // canonicalize the headers; we need the set of header names as well as the
+    // names and values to go into the signature process
+    var canonicalizedHeaderNames = CanonicalizeHeaderNames(headers);
+    var canonicalizedHeaders = CanonicalizeHeaders(headers);
+
+	// canonicalize query string
+	var canonicalizedQueryParameters = CanonicalizeQueryParameters(uri);
+
+    // canonicalize the various components of the request
+    var canonicalRequest = CanonicalizeRequest(uri,
+                                               httpMethod,
+                                               canonicalizedQueryParameters,
+                                               canonicalizedHeaderNames,
+                                               canonicalizedHeaders,
+                                               bodyHash);
+
+    // generate a hash of the canonical request, to go into signature computation
+    var canonicalRequestHashBytes
+        = CanonicalRequestHashAlgorithm.ComputeHash(Encoding.UTF8.GetBytes(canonicalRequest));
+
+    // construct the string to be signed
+    var stringToSign = new StringBuilder();
+
+    var dateStamp = requestDateTime.ToString(DateStringFormat, CultureInfo.InvariantCulture);
+    var scope = string.Format("{0}/{1}/{2}/{3}",
+                              dateStamp,
+                              awsRegion,
+                              awsService,
+                              TERMINATOR);
+
+    stringToSign.AppendFormat("{0}-{1}\n{2}\n{3}\n", SCHEME, ALGORITHM, dateTimeStamp, scope);
+    stringToSign.Append(ToHexString(canonicalRequestHashBytes, true));
+
+    // compute the signing key
+    var kha = KeyedHashAlgorithm.Create(HMACSHA256);
+    kha.Key = DeriveSigningKey(HMACSHA256, awsSecretKey, awsRegion, dateStamp, awsService);
+
+    // compute the AWS4 signature and return it
+    var signature = kha.ComputeHash(Encoding.UTF8.GetBytes(stringToSign.ToString()));
+    var signatureString = ToHexString(signature, true);
+    //Console.WriteLine("\nSignature:\n{0}", signatureString);
+
+    var authString = new StringBuilder();
+    authString.AppendFormat("{0}-{1} ", SCHEME, ALGORITHM);
+    authString.AppendFormat("Credential={0}/{1}, ", awsAccessKey, scope);
+    authString.AppendFormat("SignedHeaders={0}, ", canonicalizedHeaderNames);
+    authString.AppendFormat("Signature={0}", signatureString);
+
+    var authorization = authString.ToString();
+
+    return authorization;
+}
+
+public string CanonicalizeRequest(Uri endpointUri,
+                             string httpMethod,
+                             string canonicalizedQueryParameters,
+                             string canonicalizedHeaderNames,
+                             string canonicalizedHeaders,
+                             string bodyHash)
+{
+    var canonicalRequest = new StringBuilder();
+
+    canonicalRequest.AppendFormat("{0}\n", httpMethod);
+    canonicalRequest.AppendFormat("{0}\n", CanonicalResourcePath(endpointUri));
+    canonicalRequest.AppendFormat("{0}\n", canonicalizedQueryParameters);
+
+    canonicalRequest.AppendFormat("{0}\n", canonicalizedHeaders);
+    canonicalRequest.AppendFormat("{0}\n", canonicalizedHeaderNames);
+
+    canonicalRequest.Append(bodyHash);
+
+    return canonicalRequest.ToString();
+}
+
+public string CanonicalizeQueryParameters(Uri endpointUri)
+{
+	var queryParameters = HttpUtility.ParseQueryString(endpointUri.Query);
+	StringBuilder canonicalQueryParameters = new StringBuilder();
+
+	foreach (string key in queryParameters)
+	{
+		if (key != null)
+			canonicalQueryParameters.AppendFormat("{0}={1}&", UrlEncode(key), UrlEncode(queryParameters[key]));
+		else
+			canonicalQueryParameters.AppendFormat("{0}&", UrlEncode(queryParameters[key]));			
+	}
+	
+	// remove trailing '&'
+	if (canonicalQueryParameters.Length > 0)
+		canonicalQueryParameters.Remove(canonicalQueryParameters.Length - 1, 1);
+
+	return canonicalQueryParameters.ToString();
+}
+
+public string CanonicalResourcePath(Uri endpointUri)
+{
+    if (string.IsNullOrEmpty(endpointUri.AbsolutePath))
+        return "/";
+
+    // Encode the path per RFC3986
+	// 20220927 - Changed from AbsolutePath to LocalPath because AbsolutePath was automatically escaping whitespace which cause a double-encoding scenario
+	// with S3 when the object (aka file) had spaces in the file name.
+//    return UrlEncode(endpointUri.AbsolutePath, true);
+    return UrlEncode(endpointUri.LocalPath, true);
+}
+
+public byte[] DeriveSigningKey(string algorithm, string awsSecretAccessKey, string awsRegion, string date, string awsService)
+{
+    string ksecretPrefix = SCHEME;
+    char[] ksecret = null;
+
+    ksecret = (ksecretPrefix + awsSecretAccessKey).ToCharArray();
+
+    byte[] hashDate = ComputeKeyedHash(algorithm, Encoding.UTF8.GetBytes(ksecret), Encoding.UTF8.GetBytes(date));
+    byte[] hashRegion = ComputeKeyedHash(algorithm, hashDate, Encoding.UTF8.GetBytes(awsRegion));
+    byte[] hashService = ComputeKeyedHash(algorithm, hashRegion, Encoding.UTF8.GetBytes(awsService));
+    return ComputeKeyedHash(algorithm, hashService, Encoding.UTF8.GetBytes(TERMINATOR));
+}
+
+public byte[] ComputeKeyedHash(string algorithm, byte[] key, byte[] data)
+{
+    var kha = KeyedHashAlgorithm.Create(algorithm);
+    kha.Key = key;
+    return kha.ComputeHash(data);
+}
+
+public string CanonicalizeHeaderNames(IDictionary<string, string> headers)
+{
+    var headersToSign = new List<string>(headers.Keys);
+    headersToSign.Sort(StringComparer.OrdinalIgnoreCase);
+
+    var sb = new StringBuilder();
+    foreach (var header in headersToSign)
+    {
+        if (sb.Length > 0)
+            sb.Append(";");
+        sb.Append(header.ToLower());
+    }
+    return sb.ToString();
+}
+
+public string CanonicalizeHeaders(IDictionary<string, string> headers)
+{
+    if (headers == null || headers.Count == 0)
+        return string.Empty;
+
+    // step1: sort the headers into lower-case format; we create a new
+    // map to ensure we can do a subsequent key lookup using a lower-case
+    // key regardless of how 'headers' was created.
+    var sortedHeaderMap = new SortedDictionary<string, string>();
+    foreach (var header in headers.Keys)
+    {
+        sortedHeaderMap.Add(header.ToLower(), headers[header]);
+    }
+
+    // step2: form the canonical header:value entries in sorted order. 
+    // Multiple white spaces in the values should be compressed to a single 
+    // space.
+    var sb = new StringBuilder();
+    foreach (var header in sortedHeaderMap.Keys)
+    {
+        var headerValue = CompressWhitespaceRegex.Replace(sortedHeaderMap[header], " ");
+        sb.AppendFormat("{0}:{1}\n", header, headerValue.Trim());
+    }
+
+    return sb.ToString();
+}
+
+public string UrlEncode(string data, bool isPath = false)
+{
+    // The Set of accepted and valid Url characters per RFC3986. Characters outside of this set will be encoded.
+    const string validUrlCharacters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.~";
+
+    var encoded = new StringBuilder(data.Length * 2);
+    string unreservedChars = String.Concat(validUrlCharacters, (isPath ? "/:" : ""));
+
+    foreach (char symbol in System.Text.Encoding.UTF8.GetBytes(data))
+    {
+        if (unreservedChars.IndexOf(symbol) != -1)
+            encoded.Append(symbol);
+        else
+            encoded.Append("%").Append(String.Format("{0:X2}", (int)symbol));
+	}
+
+    return encoded.ToString();
+}
+
+public string ToHexString(byte[] data, bool lowercase)
+{
+    var sb = new StringBuilder();
+    for (var i = 0; i < data.Length; i++)
+    {
+        sb.Append(data[i].ToString(lowercase ? "x2" : "X2"));
+    }
+    return sb.ToString();
+}
+
+//Convert Collection to Dictionary
+public static Dictionary<String, String> DataTableToDictionary(DataTable dt)
+{
+	Dictionary<String, String> result = new Dictionary<String, String>();
+	foreach (DataRow row in dt.Rows)
+	{           
+		foreach (DataColumn col in dt.Columns)
+		{
+			result.Add(col.ColumnName, row[col].ToString());
+		}
+	}
+	return result;
+}
+
+//Add or Update Dictionary
+void addOrUpdateDict(Dictionary<string, string> dic, string key, string newValue)
+{
+    string val;
+    if (dic.TryGetValue(key, out val))
+    {
+        // yay, value exists!
+        dic[key] = newValue;
+    }
+    else
+    {
+        // darn, lets add the value
+        dic.Add(key, newValue);
+    }
+}]]></code></stage><stage stageid="903b3bb4-7987-4b71-ab8e-8925c0e3d8b6" name="Clean Up" type="SubSheetInfo"><subsheetid>ffa70557-69e3-4cb1-a3ef-9bee4609d5b4</subsheetid><narrative>Clean Up actions</narrative><display x="-195" y="-105" w="150" h="90" /></stage><stage stageid="ede7179b-adca-40ec-a878-81e6af1e40c1" name="Start" type="Start"><subsheetid>ffa70557-69e3-4cb1-a3ef-9bee4609d5b4</subsheetid><loginhibit /><narrative>Start of action</narrative><display x="15" y="-105" /><onsuccess>edf1524e-07b5-4b9d-b4cf-06546800ba5a</onsuccess></stage><stage stageid="edf1524e-07b5-4b9d-b4cf-06546800ba5a" name="End" type="End"><subsheetid>ffa70557-69e3-4cb1-a3ef-9bee4609d5b4</subsheetid><loginhibit /><narrative>End of action</narrative><display x="15" y="90" /></stage><stage stageid="babe37ca-9067-4a49-ad96-37eda3886832" name="Note1" type="Note"><subsheetid>ffa70557-69e3-4cb1-a3ef-9bee4609d5b4</subsheetid><narrative>Clean Up Page
+
+This is an optional page where you might choose to perform some finalisation (or "cleanup") tasks as your business object is closed down.
+
+The cleanup action will be called automatically immediately after closing your business object at the end of a business process.
+
+You will not be able to call this action from a business process, nor will it be called at any other time than before the disposal of the business object.</narrative><display x="-180" y="60" w="180" h="230" /></stage><stage stageid="5b4b47c3-c4ce-4b4b-8b5f-6c0abd05bd83" name="Note2" type="Note"><narrative>Initialise Page
+
+This is an optional page where you might choose to perform some initialisation tasks after your business object is loaded.
+
+The initialise action will be called automatically immediately after loading your business object.
+
+You will not be able to call this action from a business process, nor will it be called at any other time than after the creation of the object.</narrative><display x="-195" y="60" w="180" h="230" /></stage><stage stageid="9afb2c31-fa03-41f0-a680-061272977e60" name="Call AWS Service" type="SubSheetInfo"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><narrative>Computes Signature and makes a HTTP call to the AWS service</narrative><display x="-195" y="-105" w="150" h="90" /></stage><stage stageid="0cbd6c3f-7953-4368-beb6-4d83b9521766" name="Start" type="Start"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><narrative>Start of action</narrative><display x="105" y="-195" /><inputs><input type="collection" name="Common Parameters" narrative="(Single row collection)  Common Parameters to be passed when calling AWS HTTP service" stage="Common Parameters" /><input type="collection" name="Request Parameters" narrative="(Single row collection) Request Parameters to be passed when calling AWS HTTP service" stage="Request Parameters" /><input type="collection" name="RequestHeaders" narrative="(Single row collection) Additional Request Headers to be passed when calling AWS HTTP service" stage="RequestHeaders" /><input type="text" name="Accept" narrative="The desired MIME type of the body in the response" stage="Accept" /><input type="flag" name="Include Request Headers In Signature" narrative="Flag to indicate whether to include Request Headers in Signature Computation" stage="Include Request Headers In Signature" /><input type="flag" name="Remove Blank URI Param" narrative="Flag to indicate whether to remove blank URI params" stage="Remove Blank URI Param" /></inputs><onsuccess>ae1405c3-4226-4b6d-a537-6ed050c4c5f1</onsuccess></stage><stage stageid="9c83812e-fad8-4f7d-8442-411c2943fe45" name="End" type="End"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><narrative>End of action</narrative><display x="105" y="1275" /><outputs><output type="number" name="Status Code" narrative="The HTTP status code returned from the call to the AWS service." stage="Status Code" /><output type="collection" name="Response Headers" narrative="The HTTP headers from the response message." stage="Response Headers" /><output type="text" name="Response" narrative="Response as received from the AWS API call" stage="Response" /></outputs></stage><stage stageid="6ab8e19c-f9d8-47de-949b-cca26517bc61" name="Common Parameters" type="Collection"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><narrative>Parameters for AWS API Call</narrative><display x="-255" y="150" /><datatype>collection</datatype><private /><alwaysinit /></stage><stage stageid="1f5341e0-117d-4a29-9829-23001f8b8af1" name="Note3" type="Note"><loginhibit /><narrative>‘The MIT License’
+
+© 2020 Blue Prism Limited
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE
+</narrative><display x="390" y="30" w="240" h="300" /><font family="Segoe UI" size="10" style="Regular" color="3366FF" /></stage><stage stageid="3aa3c4ca-9830-4455-b219-b311073d2eaa" name="Input Data Items" type="Block"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="-300" y="120" w="210" h="105" /><font family="Segoe UI" size="10" style="Regular" color="FFCC00" /></stage><stage stageid="cbf8afaf-59a7-4d58-902c-cb914d1f9ffc" name="Local Data Items" type="Block"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="-300" y="-45" w="210" h="150" /><font family="Segoe UI" size="10" style="Regular" color="339966" /></stage><stage stageid="13dae53b-9e2b-442b-8608-49ffd1752d9a" name="Output Data Items" type="Block"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="-300" y="240" w="210" h="60" /><font family="Segoe UI" size="10" style="Regular" color="993300" /></stage><stage stageid="6ec00142-a3b6-4283-a353-74d6825d05e1" name="Response" type="Data"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><narrative>Response as received from the AWS API call</narrative><display x="-135" y="270" /><datatype>text</datatype><initialvalue /><private /><alwaysinit /></stage><stage stageid="0bdd0d42-71ca-492a-88f4-581a6af4124d" name="Compute Signature" type="Code"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><narrative>Computes AWS Signature v4
+</narrative><display x="105" y="735" /><inputs><input type="text" name="AccessID" expr="[Common Parameters.AccessID]" /><input type="password" name="SecretKey" expr="[Common Parameters.SecretKey]" /><input type="text" name="AWSRegion" expr="[Common Parameters.AWSRegion]" /><input type="text" name="AWSEndpoint" expr="[AWSEndpoint]" /><input type="text" name="AWSTarget" expr="[Common Parameters.AWSTarget]" /><input type="text" name="AWSService" expr="[Common Parameters.AWSService]" /><input type="text" name="RequestBody" expr="[Request Parameters.RequestData]" /><input type="text" name="HTTPMethod" expr="[Common Parameters.HTTPMethod]" /><input type="collection" name="CommonParameters" expr="[Common Parameters]" /><input type="collection" name="HeadersDT" expr="[Headers]" /></inputs><outputs><output type="text" name="strAuthSignature" stage="Common Parameters.AuthSignature" /><output type="text" name="strAuthDate" stage="Common Parameters.AuthDate" /><output type="text" name="contentHashString" stage="Headers.X-Amz-Content-Sha256" /></outputs><onsuccess>d7de0a79-45bf-41da-9b3a-f852d5f18143</onsuccess><code><![CDATA[string strBody = RequestBody;
+
+// precompute hash of the body content. Check if there is a file upload request
+byte[] contentHash;
+if (CommonParameters.Columns.Contains("UploadFilePath"))
+{
+	DataRow row = CommonParameters.Rows[0];
+	var file_path = row["UploadFilePath"].ToString();
+	if(file_path!="")
+	{
+		byte[] byteArray = File.ReadAllBytes(file_path);
+		contentHash = CanonicalRequestHashAlgorithm.ComputeHash(byteArray);
+	}
+	else
+	{
+		contentHash = CanonicalRequestHashAlgorithm.ComputeHash(Encoding.UTF8.GetBytes(strBody));
+	}
+}
+else
+{
+	contentHash = CanonicalRequestHashAlgorithm.ComputeHash(Encoding.UTF8.GetBytes(strBody));
+}
+
+contentHashString = ToHexString(contentHash, true);
+
+var requestDateTime = DateTime.UtcNow;
+var dateTimeStamp = requestDateTime.ToString(ISO8601BasicFormat, CultureInfo.InvariantCulture);
+strAuthDate = dateTimeStamp;
+
+var headers = DataTableToDictionary(HeadersDT);
+addOrUpdateDict(headers,"X-Amz-Date", dateTimeStamp);
+addOrUpdateDict(headers,"X-Amz-Content-Sha256",contentHashString);
+
+strAuthSignature = ComputeSignature(headers,
+											dateTimeStamp,
+                                            HTTPMethod,
+                                            contentHashString,
+                                            AccessID,
+                                            SecretKey,
+											AWSEndpoint,
+											AWSRegion,
+											AWSService);																				]]></code></stage><stage stageid="f725b7c9-b61c-4820-a1b3-5ee0a1021cba" name="Send HTTP Request" type="Action"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit onsuccess="true" /><display x="105" y="1125" /><inputs><input type="text" name="Address URL" friendlyname="Address URL" narrative="The URL to send the HTTP data to" expr="[AWSEndpoint]" /><input type="text" name="Body" friendlyname="Body" narrative="The body text of the HTTP request" expr="[Request Parameters.RequestData]" /><input type="flag" name="Use Proxy" friendlyname="Use Proxy" narrative="Set true if you need to use a proxy" expr="" /><input type="text" name="Content Type" friendlyname="Content Type" narrative="The content type of the HTTP request." expr="[Common Parameters.Content-Type]" /><input type="text" name="Method" friendlyname="Method" narrative="The method of the HTTP request." expr="[Common Parameters.HTTPMethod]" /><input type="text" name="Proxy URL" friendlyname="Proxy URL" narrative="OPTIONAL: The proxy url" expr="" /><input type="text" name="Proxy Username" friendlyname="Proxy Username" narrative="OPTIONAL: The proxy username" expr="" /><input type="password" name="Proxy Password" friendlyname="Proxy Password" narrative="OPTIONAL: The proxy password" expr="" /><input type="collection" name="Headers" friendlyname="Headers" narrative="OPTIONAL: Headers" expr="[Headers]" /><input type="text" name="Accept" friendlyname="Accept" narrative="OPTIONAL: Accept" expr="[Accept]" /><input type="text" name="Username" friendlyname="Username" narrative="OPTIONAL: Basic Authentication username" expr="" /><input type="password" name="Password" friendlyname="Password" narrative="OPTIONAL: Basic Authenction password" expr="" /><input type="text" name="Certificate ID" friendlyname="Certificate ID" narrative="OPTIONAL: The id of the client authentication certificate" expr="" /><input type="flag" name="Force Pre Authorization" friendlyname="Force Pre Authorization" narrative="OPTIONAL: Force the request to send the 'Authorization' header for HTTP Basic." expr="" /><input type="flag" name="File URL" friendlyname="File URL" narrative="OPTIONAL: Is the JSON Body a file instead?" expr="" /><input type="flag" name="Use Bearer Token" friendlyname="Use Bearer Token" expr="" /><input type="text" name="Bearer Token" friendlyname="Bearer Token" narrative="OPTIONAL: If you 'Use Bearer Token' is set to True, this must be set to the value of the actual Bearer Token." expr="" /><input type="flag" name="Allow Auto Redirects" friendlyname="Allow Auto Redirects" narrative="OPTIONAL: If you prefer to manually handle redirects (ie. HTTP 302) set this flag to False. Default value is True." expr="" /><input type="number" name="Maximum Redirects" friendlyname="Maximum Redirects" narrative="OPTIONAL: If 'Allow Auto Redirect' is True, this controls the maximum number of redirects to allow. Default value is 50." expr="" /><input type="number" name="Request Timeout" friendlyname="Request Timeout" narrative="OPTIONAL: This  property controls the length of time, in milliseconds, until the request times out and throws a WebException. Default value is 100000 milliseconds (i.e. 100 seconds)." expr="" /></inputs><outputs><output type="text" name="Result" friendlyname="Result" narrative="The result from the Post query." stage="Response" /><output type="text" name="Headers as Json" friendlyname="Headers as Json" narrative="The returned headers response as Json" stage="Headers as Json" /><output type="number" name="Status Code" friendlyname="Status Code" narrative="The HTTP status code associated with the request." stage="Status Code" /></outputs><onsuccess>e16c87e4-e26d-48f6-a462-05d15f2e938c</onsuccess><resource object="Utility - HTTP" action="HTTP Request" /></stage><stage stageid="2da78e5d-5dea-4a3c-a68d-510b971a5246" name="Set Headers" type="MultipleCalculation"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="105" y="915" /><onsuccess>b90b285f-bcc7-40f1-858c-935a10a9932e</onsuccess><steps><calculation expression="[Common Parameters.AuthDate]" stage="Headers.X-Amz-Date" /><calculation expression="[Common Parameters.AuthSignature]" stage="Headers.Authorization" /></steps></stage><stage stageid="e0262f81-6530-4b6f-8ebb-8448ef87b173" name="Set Request Fields" type="LoopStart"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="105" y="60" /><onsuccess>d1cd1c1b-96f2-49d7-acda-0fa4712ff652</onsuccess><groupid>c6c67517-3b70-441f-9496-03c162f134e5</groupid><looptype>ForEach</looptype><loopdata>Transposed Request Parameters</loopdata></stage><stage stageid="0c431b94-ee4d-4ee0-aaad-df2a0892ecf7" name="Set Request Fields" type="LoopEnd"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="105" y="195" /><onsuccess>05565dbe-23d1-476d-a797-0a1271fbafe0</onsuccess><groupid>c6c67517-3b70-441f-9496-03c162f134e5</groupid></stage><stage stageid="d1cd1c1b-96f2-49d7-acda-0fa4712ff652" name="Field Exists in URL" type="Decision"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="105" y="120" /><decision expression="InStr([Common Parameters.ActionURL], [Transposed Request Parameters.Name])&gt;0" /><ontrue>15f590b7-5b3d-4d9a-b4ea-20a771dea2e0</ontrue><onfalse>0c431b94-ee4d-4ee0-aaad-df2a0892ecf7</onfalse></stage><stage stageid="15f590b7-5b3d-4d9a-b4ea-20a771dea2e0" name="Update FieldValue in URL" type="Calculation"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="195" y="120" /><onsuccess>607995d4-da89-4852-b4c5-a230edad3539</onsuccess><calculation expression="Replace([Common Parameters.ActionURL], &quot;[&quot;&amp;[Transposed Request Parameters.Name]&amp;&quot;]&quot;, [Transposed Request Parameters.Value])" stage="Common Parameters.ActionURL" /></stage><stage stageid="974859ff-4ecc-4dfb-9a1d-ea1b84da4bce" name="Transpose Collection" type="Action"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit onsuccess="true" /><display x="105" y="15" /><inputs><input type="collection" name="Collection" friendlyname="Collection" narrative="The collection to transpose." expr="[Request Parameters]" /></inputs><outputs><output type="collection" name="Appended Collection" friendlyname="Appended Collection" narrative="The transposed collection." stage="Transposed Request Parameters" /></outputs><onsuccess>e0262f81-6530-4b6f-8ebb-8448ef87b173</onsuccess><resource object="Utility - Collection Manipulation" action="Transpose Collection" /></stage><stage stageid="10546ca7-8958-41a4-a63c-e0f71a828485" name="Transposed Request Parameters" type="Collection"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><narrative>Collection of HTTP request parameters</narrative><display x="-195" y="-15" /><datatype>collection</datatype><private /><alwaysinit /></stage><stage stageid="817a3d29-b458-4568-bf0d-e3276194fcba" name="Request Parameters" type="Collection"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><narrative>Collection of HTTP request parameters</narrative><display x="-195" y="150" /><datatype>collection</datatype><private /><alwaysinit /></stage><stage stageid="05565dbe-23d1-476d-a797-0a1271fbafe0" name="Request Body Exists" type="Action"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit onsuccess="true" /><display x="105" y="240" /><inputs><input type="collection" name="Input Collection" friendlyname="Input Collection" narrative="The collection to check." expr="[Request Parameters]" /><input type="text" name="Field" friendlyname="Field" narrative="The field to check for." expr="&quot;RequestData&quot;" /></inputs><outputs><output type="flag" name="Exists" friendlyname="Exists" narrative="True if the collection contains the field." stage="RequestData Exists" /></outputs><onsuccess>732868ae-2309-4d53-ab06-022fcf611c82</onsuccess><resource object="Utility - Collection Manipulation" action="Field Exists" /></stage><stage stageid="4aec1883-4582-46b1-a19f-2c96e9727892" name="RequestData Exists" type="Data"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><narrative>Flag to indicate if HTTP Body exists</narrative><display x="-135" y="-15" /><datatype>flag</datatype><initialvalue /><private /><alwaysinit /></stage><stage stageid="bcc3dbdb-3ae7-4cee-9dd8-05956e9b30ce" name="Request Body?" type="Decision"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="105" y="345" /><decision expression="[RequestData Exists]" /><ontrue>2ce7be17-38a5-4a57-afa0-5fca13ff5761</ontrue><onfalse>c556d94c-2818-4a1d-9382-2cda8f707336</onfalse></stage><stage stageid="c556d94c-2818-4a1d-9382-2cda8f707336" name="Append Field" type="Action"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit onsuccess="true" /><display x="30" y="345" /><inputs><input type="collection" name="Collection" friendlyname="Collection" narrative="The collection to append a field to." expr="[Request Parameters]" /><input type="text" name="Field Name" friendlyname="Field Name" narrative="The name of the new field." expr="&quot;RequestData&quot;" /><input type="text" name="Value" friendlyname="Value" narrative="The value to be put in the new field." expr="&quot;&quot;" /></inputs><outputs><output type="collection" name="Appended Collection" friendlyname="Appended Collection" narrative="The collection with field appended." stage="Request Parameters" /></outputs><onsuccess>2ce7be17-38a5-4a57-afa0-5fca13ff5761</onsuccess><resource object="Utility - Collection Manipulation" action="Append Field (Text)" /></stage><stage stageid="b23bf976-9011-49e3-a335-467848e394d9" name="Collections::Count Rows" type="Action"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit onsuccess="true" /><display x="105" y="-75" /><inputs><input type="text" name="Collection Name" friendlyname="Collection Name" narrative="The name of the collection to act upon" expr="&quot;Request Parameters&quot;" /></inputs><outputs><output type="number" name="Count" friendlyname="Count" narrative="The number of rows counted in the collection" stage="ParamCount" /></outputs><onsuccess>9354edbc-d9c1-496b-91fd-2118ae2d6082</onsuccess><resource object="Blueprism.AutomateProcessCore.clsCollectionActions" action="Count Rows" /></stage><stage stageid="3cb13eb2-0d15-48b1-9262-cbaa0e40481f" name="ParamCount" type="Data"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><narrative>Count of number of HTTP request parameters</narrative><display x="-255" y="30" /><datatype>number</datatype><initialvalue /><private /><alwaysinit /></stage><stage stageid="9354edbc-d9c1-496b-91fd-2118ae2d6082" name="ParamCount&gt;0" type="Decision"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="105" y="-30" /><decision expression="[ParamCount]&gt;0" /><ontrue>974859ff-4ecc-4dfb-9a1d-ea1b84da4bce</ontrue><onfalse>32d635ce-9a90-4de1-b2a6-2ce028afa4ae</onfalse></stage><stage stageid="32d635ce-9a90-4de1-b2a6-2ce028afa4ae" name="Anchor1" type="Anchor"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="30" y="-30" w="10" h="10" /><onsuccess>93c48cb2-628a-4ae0-913a-d3273be82b58</onsuccess></stage><stage stageid="93c48cb2-628a-4ae0-913a-d3273be82b58" name="Anchor2" type="Anchor"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="30" y="240" w="10" h="10" /><onsuccess>05565dbe-23d1-476d-a797-0a1271fbafe0</onsuccess></stage><stage stageid="2ce7be17-38a5-4a57-afa0-5fca13ff5761" name="IncludeRegionInURL?" type="Decision"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="105" y="390" /><decision expression="[Common Parameters.IncludeRegionInURL]" /><ontrue>fa78e09c-f3b3-48b3-939d-08accebbe43e</ontrue><onfalse>aa1526ce-58d4-4c23-88af-f81972f14175</onfalse></stage><stage stageid="fa78e09c-f3b3-48b3-939d-08accebbe43e" name="Set AWSEndpoint" type="Calculation"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="30" y="420" /><onsuccess>63d7a77d-e04e-4347-950b-4d6705b9923a</onsuccess><calculation expression="&quot;https://&quot;&amp;[Common Parameters.AWSServiceURL]&amp;&quot;.&quot;&amp;[Common Parameters.AWSRegion]&amp;&quot;.amazonaws.com&quot;&amp;[Common Parameters.ActionURL]" stage="AWSEndpoint" /></stage><stage stageid="4d01b742-2146-4d1d-b4b6-02b2b241213d" name="AWSEndpoint" type="Data"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><narrative>Endpoint for the HTTP request</narrative><display x="-195" y="30" /><datatype>text</datatype><initialvalue /><private /><alwaysinit /></stage><stage stageid="aa1526ce-58d4-4c23-88af-f81972f14175" name="Set AWSEndpoint" type="Calculation"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="195" y="420" /><onsuccess>63d7a77d-e04e-4347-950b-4d6705b9923a</onsuccess><calculation expression="&quot;https://&quot;&amp;[Common Parameters.AWSServiceURL]&amp;&quot;.amazonaws.com&quot;&amp;[Common Parameters.ActionURL]" stage="AWSEndpoint" /></stage><stage stageid="fa78dfbc-a9b6-4e7d-925d-46295c889642" name="Merge RequestHeaders" type="Action"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit onsuccess="true" /><display x="45" y="690" /><inputs><input type="collection" name="Collection 1" friendlyname="Collection 1" narrative="The first collection to be merged." expr="[Headers]" /><input type="collection" name="Collection 2" friendlyname="Collection 2" narrative="The second collection to be merged." expr="[RequestHeaders]" /></inputs><outputs><output type="collection" name="Collection 3" friendlyname="Collection 3" narrative="The resulting merged collection." stage="Headers" /></outputs><onsuccess>0bdd0d42-71ca-492a-88f4-581a6af4124d</onsuccess><resource object="Utility - Collection Manipulation" action="Merge Collection" /></stage><stage stageid="49defc98-4996-42b3-9da1-ff92a91f6105" name="RequestHeaders" type="Collection"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="-135" y="150" /><datatype>collection</datatype><private /><alwaysinit /></stage><stage stageid="4b463340-3278-43d2-986e-ce407784384d" name="Add Field X-Amz-Target" type="Action"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit onsuccess="true" /><display x="105" y="510" /><inputs><input type="collection" name="Collection" friendlyname="Collection" narrative="The collection to append a field to." expr="[Headers]" /><input type="text" name="Field Name" friendlyname="Field Name" narrative="The name of the new field." expr="&quot;X-Amz-Target&quot;" /><input type="text" name="Value" friendlyname="Value" narrative="The value to be put in the new field." expr="[Common Parameters.AWSTarget]" /></inputs><outputs><output type="collection" name="Appended Collection" friendlyname="Appended Collection" narrative="The collection with field appended." stage="Headers" /></outputs><onsuccess>9874df3d-19a5-4f8f-8024-1adeb5f76d2c</onsuccess><resource object="Utility - Collection Manipulation" action="Append Field (Text)" /></stage><stage stageid="b026bf70-a972-4301-9286-a2cd7fa50e3a" name="Add Field X-Amz-Date" type="Action"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit onsuccess="true" /><display x="105" y="600" /><inputs><input type="collection" name="Collection" friendlyname="Collection" narrative="The collection to append a field to." expr="[Headers]" /><input type="text" name="Field Name" friendlyname="Field Name" narrative="The name of the new field." expr="&quot;X-Amz-Date&quot;" /><input type="text" name="Value" friendlyname="Value" narrative="The value to be put in the new field." expr="&quot;&quot;" /></inputs><outputs><output type="collection" name="Appended Collection" friendlyname="Appended Collection" narrative="The collection with field appended." stage="Headers" /></outputs><onsuccess>7dea2cc4-462f-47bb-bb5a-4518ec72de90</onsuccess><resource object="Utility - Collection Manipulation" action="Append Field (Text)" /></stage><stage stageid="e6ffd9e8-dd4f-42e5-8749-369740d5e7fb" name="Add Field Authorization" type="Action"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit onsuccess="true" /><display x="105" y="870" /><inputs><input type="collection" name="Collection" friendlyname="Collection" narrative="The collection to append a field to." expr="[Headers]" /><input type="text" name="Field Name" friendlyname="Field Name" narrative="The name of the new field." expr="&quot;Authorization&quot;" /><input type="text" name="Value" friendlyname="Value" narrative="The value to be put in the new field." expr="&quot;&quot;" /></inputs><outputs><output type="collection" name="Appended Collection" friendlyname="Appended Collection" narrative="The collection with field appended." stage="Headers" /></outputs><onsuccess>2da78e5d-5dea-4a3c-a68d-510b971a5246</onsuccess><resource object="Utility - Collection Manipulation" action="Append Field (Text)" /></stage><stage stageid="9874df3d-19a5-4f8f-8024-1adeb5f76d2c" name="Add Field X-Amz-Content-Sha256" type="Action"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit onsuccess="true" /><display x="105" y="555" /><inputs><input type="collection" name="Collection" friendlyname="Collection" narrative="The collection to append a field to." expr="[Headers]" /><input type="text" name="Field Name" friendlyname="Field Name" narrative="The name of the new field." expr="&quot;X-Amz-Content-Sha256&quot;" /><input type="text" name="Value" friendlyname="Value" narrative="The value to be put in the new field." expr="&quot;&quot;" /></inputs><outputs><output type="collection" name="Appended Collection" friendlyname="Appended Collection" narrative="The collection with field appended." stage="Headers" /></outputs><onsuccess>b026bf70-a972-4301-9286-a2cd7fa50e3a</onsuccess><resource object="Utility - Collection Manipulation" action="Append Field (Text)" /></stage><stage stageid="63d7a77d-e04e-4347-950b-4d6705b9923a" name="Add Header Row" type="Action"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit onsuccess="true" /><display x="105" y="465" /><inputs><input type="text" name="Collection Name" friendlyname="Collection Name" narrative="The name of the collection to act upon" expr="&quot;Headers&quot;" /></inputs><onsuccess>4b463340-3278-43d2-986e-ce407784384d</onsuccess><resource object="Blueprism.AutomateProcessCore.clsCollectionActions" action="Add Row" /></stage><stage stageid="8bf567a3-541b-466b-93a8-377de330bb09" name="Headers" type="Collection"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="-255" y="-15" /><datatype>collection</datatype><private /><alwaysinit /></stage><stage stageid="b90b285f-bcc7-40f1-858c-935a10a9932e" name="HTTP Download File?" type="Action"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit onsuccess="true" /><display x="105" y="960" /><inputs><input type="collection" name="Input Collection" friendlyname="Input Collection" narrative="The collection to check." expr="[Common Parameters]" /><input type="text" name="Field" friendlyname="Field" narrative="The field to check for." expr="&quot;DownloadFilePath&quot;" /></inputs><outputs><output type="flag" name="Exists" friendlyname="Exists" narrative="True if the collection contains the field." stage="DownloadFile" /></outputs><onsuccess>ca112208-aec0-440d-9eec-86acab983ee9</onsuccess><resource object="Utility - Collection Manipulation" action="Field Exists" /></stage><stage stageid="ca112208-aec0-440d-9eec-86acab983ee9" name="Download Field Exists?" type="Decision"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="105" y="1005" /><decision expression="[DownloadFile]" /><ontrue>0f3202ef-674e-4269-ba4d-bd98237a4f59</ontrue><onfalse>e2b70975-4734-4448-b61a-f50a57d2b5bf</onfalse></stage><stage stageid="c3a7d634-8a91-4a5b-8e32-78f4bd6be517" name="DownloadFile" type="Data"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><display x="-135" y="30" /><datatype>flag</datatype><initialvalue>False</initialvalue><private /><alwaysinit /></stage><stage stageid="2580765f-9ebb-4bb4-89a5-f27a3b08faf2" name="Send HTTP Request to download file" type="Action"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit onsuccess="true" /><display x="-15" y="1125" /><inputs><input type="text" name="Address URL" friendlyname="Address URL" narrative="The URL to send the HTTP data to" expr="[AWSEndpoint]" /><input type="text" name="Body" friendlyname="Body" narrative="The body text of the HTTP request" expr="[Request Parameters.RequestData]" /><input type="flag" name="Use Proxy" friendlyname="Use Proxy" narrative="Set true if you need to use a proxy" expr="" /><input type="text" name="Content Type" friendlyname="Content Type" narrative="The content type of the HTTP request." expr="[Common Parameters.Content-Type]" /><input type="text" name="Method" friendlyname="Method" narrative="The method of the HTTP request." expr="[Common Parameters.HTTPMethod]" /><input type="text" name="Proxy URL" friendlyname="Proxy URL" narrative="OPTIONAL: The proxy url" expr="" /><input type="text" name="Proxy Username" friendlyname="Proxy Username" narrative="OPTIONAL: The proxy username" expr="" /><input type="password" name="Proxy Password" friendlyname="Proxy Password" narrative="OPTIONAL: The proxy password" expr="" /><input type="collection" name="Headers" friendlyname="Headers" narrative="OPTIONAL: Headers" expr="[Headers]" /><input type="text" name="Accept" friendlyname="Accept" narrative="OPTIONAL: Accept" expr="[Accept]" /><input type="text" name="Username" friendlyname="Username" narrative="OPTIONAL: Basic Authentication username" expr="" /><input type="password" name="Password" friendlyname="Password" narrative="OPTIONAL: Basic Authenction password" expr="" /><input type="text" name="Certificate ID" friendlyname="Certificate ID" narrative="OPTIONAL: The id of the client authentication certificate" expr="" /><input type="flag" name="Force Pre Authorization" friendlyname="Force Pre Authorization" narrative="OPTIONAL: Force the request to send the authorization headers" expr="" /><input type="flag" name="File URL" friendlyname="File URL" narrative="OPTIONAL: Is the JSON Body a file instead?" expr="" /><input type="flag" name="Use Bearer Token" friendlyname="Use Bearer Token" expr="" /><input type="text" name="Bearer Token" friendlyname="Bearer Token" narrative="OPTIONAL: Enter bearer token value here if one has been provided. " expr="" /><input type="text" name="FilePath" friendlyname="FilePath" narrative="OPTIONAL: If requesting a binary file (ex. PDF) set this to the path and file name where the file should be saved. NOTE: File name should include the file extension." expr="[Common Parameters.DownloadFilePath]" /><input type="flag" name="Allow Auto Redirects" friendlyname="Allow Auto Redirects" narrative="OPTIONAL: If you prefer to manually handle redirects (ie. HTTP 302) set this flag to False. Default value is True." expr="" /><input type="number" name="Maximum Redirects" friendlyname="Maximum Redirects" narrative="OPTIONAL: If 'Allow Auto Redirect' is True, this controls the maximum number of redirects to allow. Default value is 50." expr="" /><input type="number" name="Request Timeout" friendlyname="Request Timeout" narrative="OPTIONAL: This  property controls the length of time, in milliseconds, until the request times out and throws a WebException. Default value is 100000 milliseconds (i.e. 100 seconds)." expr="" /></inputs><outputs><output type="text" name="Result" friendlyname="Result" narrative="The result from the Post query." stage="Response" /><output type="text" name="Headers as Json" friendlyname="Headers as Json" narrative="The returned headers response as Json" stage="Headers as Json" /><output type="number" name="Status Code" friendlyname="Status Code" narrative="The HTTP status code associated with the request." stage="Status Code" /></outputs><onsuccess>e16c87e4-e26d-48f6-a462-05d15f2e938c</onsuccess><resource object="Utility - HTTP" action="HTTP Request File" /></stage><stage stageid="e2b70975-4734-4448-b61a-f50a57d2b5bf" name="HTTP Upload File?" type="Action"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit onsuccess="true" /><display x="180" y="1035" /><inputs><input type="collection" name="Input Collection" friendlyname="Input Collection" narrative="The collection to check." expr="[Common Parameters]" /><input type="text" name="Field" friendlyname="Field" narrative="The field to check for." expr="&quot;UploadFilePath&quot;" /></inputs><outputs><output type="flag" name="Exists" friendlyname="Exists" narrative="True if the collection contains the field." stage="UploadFile" /></outputs><onsuccess>65feb735-c42f-49b0-bca5-0e955e5d596d</onsuccess><resource object="Utility - Collection Manipulation" action="Field Exists" /></stage><stage stageid="cac0ffd7-50cf-45b9-8aa1-abb9ae5a9e2d" name="UploadFile" type="Data"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><display x="-255" y="75" /><datatype>flag</datatype><initialvalue /><private /><alwaysinit /></stage><stage stageid="65feb735-c42f-49b0-bca5-0e955e5d596d" name="Upload File?" type="Decision"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="180" y="1080" /><decision expression="[UploadFile]" /><ontrue>0653520a-202d-44e7-9a84-a3e65e8de4aa</ontrue><onfalse>f725b7c9-b61c-4820-a1b3-5ee0a1021cba</onfalse></stage><stage stageid="2ebedde1-6df3-434b-a808-36a33b7da658" name="Send HTTP Request to upload file" type="Action"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit onsuccess="true" /><display x="330" y="1125" /><inputs><input type="text" name="Address URL" friendlyname="Address URL" narrative="The URL to send the HTTP data to" expr="[AWSEndpoint]" /><input type="text" name="Body" friendlyname="Body" narrative="The body text of the HTTP request" expr="[Common Parameters.UploadFilePath]" /><input type="flag" name="Use Proxy" friendlyname="Use Proxy" narrative="Set true if you need to use a proxy" expr="" /><input type="text" name="Content Type" friendlyname="Content Type" narrative="The content type of the HTTP request." expr="[Common Parameters.Content-Type]" /><input type="text" name="Method" friendlyname="Method" narrative="The method of the HTTP request." expr="[Common Parameters.HTTPMethod]" /><input type="text" name="Proxy URL" friendlyname="Proxy URL" narrative="OPTIONAL: The proxy url" expr="" /><input type="text" name="Proxy Username" friendlyname="Proxy Username" narrative="OPTIONAL: The proxy username" expr="" /><input type="password" name="Proxy Password" friendlyname="Proxy Password" narrative="OPTIONAL: The proxy password" expr="" /><input type="collection" name="Headers" friendlyname="Headers" narrative="OPTIONAL: Headers" expr="[Headers]" /><input type="text" name="Accept" friendlyname="Accept" narrative="OPTIONAL: Accept" expr="[Accept]" /><input type="text" name="Username" friendlyname="Username" narrative="OPTIONAL: Basic Authentication username" expr="" /><input type="password" name="Password" friendlyname="Password" narrative="OPTIONAL: Basic Authenction password" expr="" /><input type="text" name="Certificate ID" friendlyname="Certificate ID" narrative="OPTIONAL: The id of the client authentication certificate" expr="" /><input type="flag" name="Force Pre Authorization" friendlyname="Force Pre Authorization" narrative="OPTIONAL: Force the request to send the 'Authorization' header for HTTP Basic." expr="" /><input type="flag" name="File URL" friendlyname="File URL" narrative="OPTIONAL: Is the JSON Body a file instead?" expr="True" /><input type="flag" name="Use Bearer Token" friendlyname="Use Bearer Token" expr="" /><input type="text" name="Bearer Token" friendlyname="Bearer Token" narrative="OPTIONAL: If you 'Use Bearer Token' is set to True, this must be set to the value of the actual Bearer Token." expr="" /><input type="flag" name="Allow Auto Redirects" friendlyname="Allow Auto Redirects" narrative="OPTIONAL: If you prefer to manually handle redirects (ie. HTTP 302) set this flag to False. Default value is True." expr="" /><input type="number" name="Maximum Redirects" friendlyname="Maximum Redirects" narrative="OPTIONAL: If 'Allow Auto Redirect' is True, this controls the maximum number of redirects to allow. Default value is 50." expr="" /><input type="number" name="Request Timeout" friendlyname="Request Timeout" narrative="OPTIONAL: This  property controls the length of time, in milliseconds, until the request times out and throws a WebException. Default value is 100000 milliseconds (i.e. 100 seconds)." expr="" /></inputs><outputs><output type="text" name="Result" friendlyname="Result" narrative="The result from the Post query." stage="Response" /><output type="text" name="Headers as Json" friendlyname="Headers as Json" narrative="The returned headers response as Json" stage="Headers as Json" /><output type="number" name="Status Code" friendlyname="Status Code" narrative="The HTTP status code associated with the request." stage="Status Code" /></outputs><onsuccess>e16c87e4-e26d-48f6-a462-05d15f2e938c</onsuccess><resource object="Utility - HTTP" action="HTTP Request" /></stage><stage stageid="0f3202ef-674e-4269-ba4d-bd98237a4f59" name="Binary File or text/json?" type="Decision"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="30" y="1080" /><decision expression="[Common Parameters.DownloadFilePath]&lt;&gt;&quot;&quot;" /><ontrue>2580765f-9ebb-4bb4-89a5-f27a3b08faf2</ontrue><onfalse>f725b7c9-b61c-4820-a1b3-5ee0a1021cba</onfalse></stage><stage stageid="0653520a-202d-44e7-9a84-a3e65e8de4aa" name="Binary File or text/json?" type="Decision"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="225" y="1125" /><decision expression="[Common Parameters.UploadFilePath]&lt;&gt;&quot;&quot;" /><ontrue>2ebedde1-6df3-434b-a808-36a33b7da658</ontrue><onfalse>f725b7c9-b61c-4820-a1b3-5ee0a1021cba</onfalse></stage><stage stageid="6f2051f9-5981-4716-b51e-0111fc707ed1" name="Note4" type="Note"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><narrative>For HTTP File Upload request, pass CommonParameters collection with the field "UploadFilePath" containing the filepath to upload.
+
+For HTTP File Download request, pass CommonParameters collection with the field "DownloadFilePath" containing the filepath where to write the binary file.</narrative><display x="375" y="-75" w="180" h="120" /></stage><stage stageid="97005a20-b393-4f46-b5cd-ff3439ceadc2" name="Headers as Json" type="Data"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><display x="-195" y="75" /><datatype>text</datatype><initialvalue /><private /><alwaysinit /></stage><stage stageid="07a45086-bbf8-4321-815f-e0b83f89e338" name="Status Code" type="Data"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><display x="-255" y="270" /><datatype>number</datatype><initialvalue /><private /><alwaysinit /></stage><stage stageid="d5290760-c6b6-4835-8f1e-d724a2c053b1" name="Response Headers" type="Collection"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="-195" y="270" /><datatype>collection</datatype><private /><alwaysinit /></stage><stage stageid="65a75dde-c4c2-45d6-b2d7-50d9d3252811" name="Utility - JSON::JSON to Collection (skipping JArray)" type="Action"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit onsuccess="true" /><display x="105" y="1230" /><inputs><input type="text" name="json" friendlyname="json" expr="[Headers as Json]" /></inputs><outputs><output type="collection" name="Result" friendlyname="Result" stage="Response Headers" /></outputs><onsuccess>9c83812e-fad8-4f7d-8442-411c2943fe45</onsuccess><resource object="Utility - JSON" action="JSON to Collection (skipping JArray)" /></stage><stage stageid="e16c87e4-e26d-48f6-a462-05d15f2e938c" name="Headers?" type="Decision"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="105" y="1185" /><decision expression="Len(Trim([Headers as Json])) &gt; 0" /><ontrue>65a75dde-c4c2-45d6-b2d7-50d9d3252811</ontrue><onfalse>74bb0783-2f31-4acc-833d-10a013afee9c</onfalse></stage><stage stageid="74bb0783-2f31-4acc-833d-10a013afee9c" name="Anchor3" type="Anchor"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="195" y="1230" w="10" h="10" /><onsuccess>9c83812e-fad8-4f7d-8442-411c2943fe45</onsuccess></stage><stage stageid="ba1afd1c-dc80-4f6a-aea2-5f6164312e42" name="Note5" type="Note"><loginhibit /><narrative>Version: 2.4</narrative><display x="135" y="-165" w="90" h="30" /><font family="Segoe UI" size="14" style="Bold" color="FF0000" /></stage><stage stageid="beba89e2-b17a-468c-91ef-ce13ab78468c" name="Accept" type="Data"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="-255" y="195" /><datatype>text</datatype><initialvalue /><private /><alwaysinit /></stage><stage stageid="926141aa-5ad9-431f-835c-0515d7156d6b" name="Merge RequestHeaders" type="Action"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit onsuccess="true" /><display x="45" y="825" /><inputs><input type="collection" name="Collection 1" friendlyname="Collection 1" narrative="The first collection to be merged." expr="[Headers]" /><input type="collection" name="Collection 2" friendlyname="Collection 2" narrative="The second collection to be merged." expr="[RequestHeaders]" /></inputs><outputs><output type="collection" name="Collection 3" friendlyname="Collection 3" narrative="The resulting merged collection." stage="Headers" /></outputs><onsuccess>e6ffd9e8-dd4f-42e5-8749-369740d5e7fb</onsuccess><resource object="Utility - Collection Manipulation" action="Merge Collection" /></stage><stage stageid="4f21e6c6-d943-468a-b82f-a8cfd402e1d7" name="Include Request Headers In Signature" type="Data"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="-195" y="195" /><datatype>flag</datatype><initialvalue>True</initialvalue><private /><alwaysinit /></stage><stage stageid="7dea2cc4-462f-47bb-bb5a-4518ec72de90" name="Include Request Headers In Signature ?" type="Decision"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="105" y="645" /><decision expression="[Include Request Headers In Signature]" /><ontrue>fa78dfbc-a9b6-4e7d-925d-46295c889642</ontrue><onfalse>0bdd0d42-71ca-492a-88f4-581a6af4124d</onfalse></stage><stage stageid="d7de0a79-45bf-41da-9b3a-f852d5f18143" name="Include Request Headers In Signature ?" type="Decision"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="105" y="780" /><decision expression="[Include Request Headers In Signature]" /><ontrue>e6ffd9e8-dd4f-42e5-8749-369740d5e7fb</ontrue><onfalse>926141aa-5ad9-431f-835c-0515d7156d6b</onfalse></stage><stage stageid="df8ab36c-52d9-4d27-8ca0-1625771765af" name="Note6" type="Note"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><narrative>As per AWS documentation, X-Amz-* headers should be included in Signature computation. However this doesnt work in some cases. Hence this flag can be used as needed</narrative><display x="270" y="705" w="150" h="120" /></stage><stage stageid="b0b81ea9-21ed-4782-af98-4db83605e350" name="Blank URI Param?" type="Decision"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="375" y="120" /><decision expression="InStr([Common Parameters.ActionURL], &quot;&amp;&quot; &amp; [Transposed Request Parameters.Name] &amp; &quot;=&quot;)&gt;0 AND Trim([Transposed Request Parameters.Value])=&quot;&quot;" /><ontrue>c590bf9e-b91c-4412-990e-31746f7ce295</ontrue><onfalse>dad7e35e-72fd-477c-be08-51f04bb8b51a</onfalse></stage><stage stageid="c590bf9e-b91c-4412-990e-31746f7ce295" name="Remove URI param" type="Calculation"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="375" y="165" /><onsuccess>b851735d-4437-4ecf-8b1c-c83dbd8854d6</onsuccess><calculation expression="Replace([Common Parameters.ActionURL], &quot;&amp;&quot;&amp;[Transposed Request Parameters.Name]&amp;&quot;=&quot;, &quot;&quot;)" stage="Common Parameters.ActionURL" /></stage><stage stageid="f14ae60a-4945-4f4f-bb40-a38dd4281bec" name="Remove Blank URI Param" type="Data"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="-135" y="195" /><datatype>flag</datatype><initialvalue>True</initialvalue><private /><alwaysinit /></stage><stage stageid="607995d4-da89-4852-b4c5-a230edad3539" name="Remove Blank URI param?" type="Decision"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="285" y="120" /><decision expression="[Remove Blank URI Param]" /><ontrue>b0b81ea9-21ed-4782-af98-4db83605e350</ontrue><onfalse>9e4ec90b-8420-4a0c-bc32-05cb86bf75dd</onfalse></stage><stage stageid="dad7e35e-72fd-477c-be08-51f04bb8b51a" name="Blank URI Param?" type="Decision"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="465" y="120" /><decision expression="InStr([Common Parameters.ActionURL], [Transposed Request Parameters.Name] &amp; &quot;=&quot;)&gt;0 AND Trim([Transposed Request Parameters.Value])=&quot;&quot;" /><ontrue>772bb0fb-58b6-40b1-bb84-b809116de7e8</ontrue><onfalse>874b6089-ed1c-4ec9-92d9-455ef0188616</onfalse></stage><stage stageid="772bb0fb-58b6-40b1-bb84-b809116de7e8" name="Remove URI param" type="Calculation"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="465" y="165" /><onsuccess>f49ddfda-63fc-42eb-b85a-1e4ea041e988</onsuccess><calculation expression="Replace([Common Parameters.ActionURL], [Transposed Request Parameters.Name]&amp;&quot;=&quot;, &quot;&quot;)" stage="Common Parameters.ActionURL" /></stage><stage stageid="9e4ec90b-8420-4a0c-bc32-05cb86bf75dd" name="Anchor4" type="Anchor"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="285" y="195" w="10" h="10" /><onsuccess>0c431b94-ee4d-4ee0-aaad-df2a0892ecf7</onsuccess></stage><stage stageid="b851735d-4437-4ecf-8b1c-c83dbd8854d6" name="Anchor5" type="Anchor"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="375" y="195" w="10" h="10" /><onsuccess>9e4ec90b-8420-4a0c-bc32-05cb86bf75dd</onsuccess></stage><stage stageid="f49ddfda-63fc-42eb-b85a-1e4ea041e988" name="Anchor6" type="Anchor"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="465" y="195" w="10" h="10" /><onsuccess>b851735d-4437-4ecf-8b1c-c83dbd8854d6</onsuccess></stage><stage stageid="874b6089-ed1c-4ec9-92d9-455ef0188616" name="Anchor7" type="Anchor"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="525" y="120" w="10" h="10" /><onsuccess>f70cb898-68ea-4a6b-bf5b-bf71c3aff334</onsuccess></stage><stage stageid="f70cb898-68ea-4a6b-bf5b-bf71c3aff334" name="Anchor8" type="Anchor"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="525" y="195" w="10" h="10" /><onsuccess>f49ddfda-63fc-42eb-b85a-1e4ea041e988</onsuccess></stage><stage stageid="6407dbf2-31f4-462a-b953-162f153289ca" name="Note7" type="Note"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><narrative>Certain actions may fail if URI params are passed with blank values. Hence this flag can be used as needed</narrative><display x="645" y="150" w="150" h="90" /></stage><stage stageid="732868ae-2309-4d53-ab06-022fcf611c82" name="Validate URL" type="Calculation"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="105" y="300" /><onsuccess>bcc3dbdb-3ae7-4cee-9dd8-05956e9b30ce</onsuccess><calculation expression="Replace([Common Parameters.ActionURL], &quot;?&amp;&quot;, &quot;?&quot;)" stage="Common Parameters.ActionURL" /></stage><stage stageid="ae1405c3-4226-4b6d-a537-6ed050c4c5f1" name="Remove Null Value Columns  from Request Headers" type="Code"><subsheetid>7e3a7b01-2b7e-4338-adcb-7f5c796865b4</subsheetid><loginhibit /><display x="105" y="-135" w="60" h="60" /><inputs><input type="collection" name="requestHeadersInput" expr="[RequestHeaders]" /></inputs><outputs><output type="collection" name="requestHeadersOutput" stage="RequestHeaders" /></outputs><onsuccess>b23bf976-9011-49e3-a335-467848e394d9</onsuccess><code><![CDATA[for (int col = requestHeadersInput.Columns.Count - 1; col >= 0; col--)  
+{  
+    bool removeColumn = true;  
+    foreach(DataRow row in requestHeadersInput.Rows)   
+    {  
+        if (row[col].ToString()!="")     
+        {  
+            removeColumn = false;  
+            break;  
+        }  
+    }  
+    if (removeColumn) requestHeadersInput.Columns.RemoveAt(col);  
+}  
+requestHeadersOutput=requestHeadersInput;]]></code></stage></process></object>
+        <object-group id="0ab93741-f878-49f8-8d89-78e98a24aed0" name="Default" isDefaultGroup="True" xmlns="http://www.blueprism.co.uk/product/object-group">
+            <members>
+                <object id="cadfadb2-503e-40fc-8950-4aa35b4b3db1" />
+            </members>
+        </object-group>
+    </bpr:contents>
+</bpr:release>
